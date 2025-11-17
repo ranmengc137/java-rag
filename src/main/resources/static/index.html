@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Java RAG Playground</title>
+    <style>
+        :root {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: #0f172a;
+            background: #f8fafc;
+        }
+        body {
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+        }
+        .app {
+            width: min(900px, 100%);
+            background: white;
+            padding: 2rem;
+            border-radius: 16px;
+            box-shadow: 0 15px 40px rgba(15,23,42,0.1);
+        }
+        h1 {
+            margin-top: 0;
+            font-size: 1.8rem;
+        }
+        section {
+            margin-bottom: 2rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+        .result {
+            background: #0f172a;
+            color: white;
+            border-radius: 8px;
+            padding: 1rem;
+            min-height: 120px;
+            white-space: pre-wrap;
+        }
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 0.6rem 1.2rem;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        input[type="file"],
+        input[type="number"],
+        input[type="text"],
+        textarea {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #cbd5f5;
+            border-radius: 6px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        label {
+            font-weight: 600;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        .row {
+            display: flex;
+            gap: 1rem;
+        }
+        .row > div {
+            flex: 1;
+        }
+        .sources {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+        .sources span {
+            display: inline-block;
+            background: #bfdbfe;
+            color: #1e3a8a;
+            padding: 0.3rem 0.6rem;
+            border-radius: 999px;
+            margin: 0.2rem;
+        }
+        .status {
+            margin-top: 0.7rem;
+            font-size: 0.9rem;
+            color: #0f172a;
+        }
+        .error {
+            color: #b91c1c;
+        }
+    </style>
+</head>
+<body>
+<div class="app">
+    <h1>📄 Java RAG Playground</h1>
+    <p>Upload PDFs into the RAG store and run ad-hoc questions against your local backend.</p>
+
+    <section>
+        <h2>1. Upload Document</h2>
+        <label for="pdfFile">Choose PDF</label>
+        <input type="file" id="pdfFile" accept="application/pdf">
+        <button id="uploadBtn">Upload PDF</button>
+        <div id="uploadStatus" class="status"></div>
+    </section>
+
+    <section>
+        <h2>2. Ask a Question</h2>
+        <label for="question">Question</label>
+        <textarea id="question" rows="3" placeholder="Ask anything about your uploaded documents"></textarea>
+        <div class="row">
+            <div>
+                <label for="topK">Top K chunks</label>
+                <input type="number" id="topK" value="5" min="1" max="20">
+            </div>
+        </div>
+        <button id="askBtn">Ask</button>
+        <div id="queryStatus" class="status"></div>
+        <div class="result" id="answerBox">Answer will appear here…</div>
+        <div class="sources" id="sourcesBox"></div>
+    </section>
+</div>
+
+<script>
+    const uploadBtn = document.getElementById('uploadBtn');
+    const pdfInput = document.getElementById('pdfFile');
+    const uploadStatus = document.getElementById('uploadStatus');
+    const askBtn = document.getElementById('askBtn');
+    const questionInput = document.getElementById('question');
+    const topKInput = document.getElementById('topK');
+    const queryStatus = document.getElementById('queryStatus');
+    const answerBox = document.getElementById('answerBox');
+    const sourcesBox = document.getElementById('sourcesBox');
+
+    function setStatus(el, message, isError = false) {
+        el.textContent = message;
+        el.className = 'status' + (isError ? ' error' : '');
+    }
+
+    uploadBtn.addEventListener('click', async () => {
+        if (!pdfInput.files.length) {
+            setStatus(uploadStatus, 'Please choose a PDF first.', true);
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', pdfInput.files[0]);
+
+        uploadBtn.disabled = true;
+        setStatus(uploadStatus, 'Uploading…');
+
+        try {
+            const response = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
+            const data = await response.json();
+            setStatus(uploadStatus, `Uploaded document ${data.documentId} with ${data.chunksStored} chunks.`);
+        } catch (err) {
+            console.error(err);
+            setStatus(uploadStatus, 'Upload failed: ' + err.message, true);
+        } finally {
+            uploadBtn.disabled = false;
+        }
+    });
+
+    askBtn.addEventListener('click', async () => {
+        const question = questionInput.value.trim();
+        const topK = parseInt(topKInput.value, 10);
+
+        if (!question) {
+            setStatus(queryStatus, 'Please enter a question.', true);
+            return;
+        }
+
+        askBtn.disabled = true;
+        setStatus(queryStatus, 'Querying…');
+        answerBox.textContent = 'Waiting for response…';
+        sourcesBox.innerHTML = '';
+
+        try {
+            const response = await fetch('/query', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ query: question, topK })
+            });
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
+            const data = await response.json();
+            answerBox.textContent = data.answer || 'No answer returned.';
+            sourcesBox.innerHTML = (data.sources || [])
+                .map(src => `<span>chunk ${src.chunkIndex} • sim ${src.similarity.toFixed(2)}</span>`)
+                .join('');
+            setStatus(queryStatus, 'Done.');
+        } catch (err) {
+            console.error(err);
+            answerBox.textContent = '—';
+            setStatus(queryStatus, 'Query failed: ' + err.message, true);
+        } finally {
+            askBtn.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>
