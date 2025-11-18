@@ -10,6 +10,12 @@ Spring Boot implementation of a Retrieval-Augmented Generation (RAG) backend tha
 - Question answering endpoint (`/query`) with GPT-based generation
 - Clean separation of layers: controller, service, repository, config
 
+# Dev Workflow
+
+1. `docker compose up -d` (start Postgres + pgvector)
+2. `mvn spring-boot:run`
+3. Upload a PDF, then query it with curl/Postman.
+
 ## Stack
 - Java 17, Spring Boot 3
 - Spring Web, Spring Data JDBC, WebClient
