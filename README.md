@@ -2,6 +2,14 @@
 
 Spring Boot implementation of a Retrieval-Augmented Generation (RAG) backend that ingests PDFs, indexes chunk embeddings in PostgreSQL + pgvector, and answers user questions using OpenAI GPT models.
 
+## Features
+
+- PDF ingestion via REST (`/upload`) with Apache PDFBox
+- Text chunking + OpenAI embeddings
+- Vector similarity search using PostgreSQL + pgvector
+- Question answering endpoint (`/query`) with GPT-based generation
+- Clean separation of layers: controller, service, repository, config
+
 ## Stack
 - Java 17, Spring Boot 3
 - Spring Web, Spring Data JDBC, WebClient
