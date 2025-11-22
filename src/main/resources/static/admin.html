@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>KG Ingestion Control</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f8fafc; margin: 0; padding: 2rem; }
+        .card { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 10px 30px rgba(15,23,42,0.08); max-width: 800px; margin: 0 auto; }
+        h1 { margin-top: 0; }
+        button { background: #2563eb; color: white; border: none; border-radius: 6px; padding: 0.6rem 1rem; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #e2e8f0; }
+        .pill { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; background: #e2e8f0; font-size: 0.85rem; }
+        .row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.5rem; }
+        input { padding: 0.4rem; border: 1px solid #cbd5e1; border-radius: 6px; }
+        #statusBox { margin-top: 0.5rem; font-size: 0.95rem; }
+        pre { background: #0f172a; color: #fff; padding: 0.75rem; border-radius: 8px; overflow: auto; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>KG Ingestion Control</h1>
+    <div class="row">
+        <label for="limit">Docs per run:</label>
+        <input type="number" id="limit" value="5" min="1" max="50">
+        <button id="runBtn">Run now</button>
+        <span id="runResult"></span>
+    </div>
+    <div id="statusBox"></div>
+    <h3>Recent Runs</h3>
+    <table id="runsTable">
+        <thead>
+        <tr><th>ID</th><th>Status</th><th>Started</th><th>Completed</th><th>Processed</th><th>Error</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+    <h3>Debug</h3>
+    <pre id="debug"></pre>
+</div>
+<script>
+    const runBtn = document.getElementById('runBtn');
+    const limitInput = document.getElementById('limit');
+    const runResult = document.getElementById('runResult');
+    const statusBox = document.getElementById('statusBox');
+    const runsTableBody = document.querySelector('#runsTable tbody');
+    const debugBox = document.getElementById('debug');
+
+    async function fetchStatus() {
+        const res = await fetch('/admin/ingest/kg/status');
+        const data = await res.json();
+        statusBox.textContent = `Pending: ${data.pending} | Processing: ${data.processing} | Completed: ${data.completed} | Failed: ${data.failed}`;
+        renderRuns(data.recentRuns || []);
+        debugBox.textContent = JSON.stringify(data, null, 2);
+    }
+
+    function renderRuns(runs) {
+        runsTableBody.innerHTML = runs.map(r => `
+            <tr>
+                <td>${r.id}</td>
+                <td><span class="pill">${r.status || ''}</span></td>
+                <td>${r.startedAt || ''}</td>
+                <td>${r.completedAt || ''}</td>
+                <td>${r.processedCount ?? ''}</td>
+                <td>${r.errorSummary || ''}</td>
+            </tr>
+        `).join('');
+    }
+
+    runBtn.addEventListener('click', async () => {
+        const limit = parseInt(limitInput.value, 10) || 5;
+        runBtn.disabled = true;
+        runResult.textContent = 'Running...';
+        try {
+            const res = await fetch(`/admin/ingest/kg?limit=${limit}`, { method: 'POST' });
+            const data = await res.json();
+            runResult.textContent = `Run ${data.runId} processed ${data.processedCount} docs ${data.error ? '(error)' : ''}`;
+            await fetchStatus();
+        } catch (e) {
+            runResult.textContent = 'Run failed: ' + e.message;
+        } finally {
+            runBtn.disabled = false;
+        }
+    });
+
+    fetchStatus();
+    setInterval(fetchStatus, 10000);
+</script>
+</body>
+</html>

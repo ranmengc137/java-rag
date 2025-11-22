@@ -24,7 +24,7 @@ public class ChunkService {
     public List<Chunk> chunk(UUID documentId, String text) {
         // Normalize whitespace so chunk boundaries are driven by semantic content not formatting noise.
         // This keeps downstream embeddings focused on meaningful tokens rather than varying line breaks.
-        String normalized = text == null ? "" : text.replaceAll("\\s+", " ").trim();
+        String normalized = sanitize(text);
         List<Chunk> chunks = new ArrayList<>();
         if (normalized.isEmpty()) {
             return chunks;
@@ -61,5 +61,14 @@ public class ChunkService {
         }
 
         return chunks;
+    }
+
+    private String sanitize(String text) {
+        if (text == null) {
+            return "";
+        }
+        // Strip null bytes and control characters that PostgreSQL rejects.
+        String cleaned = text.replace('\u0000', ' ').replaceAll("\\p{Cntrl}", " ");
+        return cleaned.replaceAll("\\s+", " ").trim();
     }
 }

@@ -2,6 +2,20 @@
 
 Spring Boot implementation of a Retrieval-Augmented Generation (RAG) backend that ingests PDFs, indexes chunk embeddings in PostgreSQL + pgvector, and answers user questions using OpenAI GPT models.
 
+## Features
+
+- PDF ingestion via REST (`/upload`) with Apache PDFBox
+- Text chunking + OpenAI embeddings
+- Vector similarity search using PostgreSQL + pgvector
+- Question answering endpoint (`/query`) with GPT-based generation
+- Clean separation of layers: controller, service, repository, config
+
+# Dev Workflow
+
+1. `docker compose up -d` (start Postgres + pgvector)
+2. `mvn spring-boot:run`
+3. Upload a PDF, then query it with curl/Postman.
+
 ## Stack
 - Java 17, Spring Boot 3
 - Spring Web, Spring Data JDBC, WebClient
@@ -37,6 +51,7 @@ export OPENAI_API_KEY=<your-key>
 export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ragdb
 export SPRING_DATASOURCE_USERNAME=postgres
 export SPRING_DATASOURCE_PASSWORD=postgres
+export SECURITY_API_KEY=<optional-shared-secret-for-clients>
 ```
 
 ## Run PostgreSQL + pgvector
@@ -81,6 +96,14 @@ Response:
 }
 ```
 
+### Stream Answers (SSE)
+```
+curl -N -X POST http://localhost:8080/query/stream \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Give me a short summary","topK":5}'
+```
+Streams answer tokens as Server-Sent Events for faster first-token latency.
+
 ## Project Structure
 ```
 java-rag/
@@ -97,8 +120,8 @@ java-rag/
 ```
 
 ## Future Improvements
-1. **Batch Embedding Calls** – send chunk batches to OpenAI to reduce latency.
-2. **Streaming Chat Responses** – stream answers to clients for faster perceived performance.
-3. **Auth & Rate Limiting** – secure endpoints before production use.
-4. **Observability** – metrics/tracing for ingestion + query pipelines.
-5. **Vector Cache** – add Redis/KeyDB cache for frequently asked queries.
+1. **Persistent Vector Cache** – move the in-memory cache to Redis/KeyDB and add invalidation per document.
+2. **Auth Hardening** – replace shared key with JWT/OAuth and per-identity rate limits.
+3. **Chunk Metadata** – store page numbers/sections for richer citations in responses.
+4. **LLM Guardrails** – add moderation and prompt-injection filtering.
+5. **Ops** – add health/readiness probes and autoscaling tuned for streaming traffic.

@@ -70,12 +70,33 @@
             display: block;
             margin-bottom: 0.5rem;
         }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: #e2e8f0;
+            border-radius: 999px;
+            padding: 0.35rem 0.75rem;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
         .row {
             display: flex;
             gap: 1rem;
         }
         .row > div {
             flex: 1;
+        }
+        .flex {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .inline {
+            display: inline-flex;
+            gap: 0.5rem;
+            align-items: center;
         }
         .sources {
             margin-top: 1rem;
@@ -108,6 +129,8 @@
         <h2>1. Upload Document</h2>
         <label for="pdfFile">Choose PDF</label>
         <input type="file" id="pdfFile" accept="application/pdf">
+        <label for="uploadCategory">Category (optional)</label>
+        <input type="text" id="uploadCategory" placeholder="e.g., history, childcare, legal">
         <button id="uploadBtn">Upload PDF</button>
         <div id="uploadStatus" class="status"></div>
     </section>
@@ -121,6 +144,21 @@
                 <label for="topK">Top K chunks</label>
                 <input type="number" id="topK" value="5" min="1" max="20">
             </div>
+            <div>
+                <label for="category">Category (optional)</label>
+                <select id="category">
+                    <option value="">All</option>
+                </select>
+            </div>
+            <div>
+                <label for="apiKey">X-API-KEY (optional)</label>
+                <input type="text" id="apiKey" placeholder="Shared key if enabled">
+            </div>
+        </div>
+        <div class="flex">
+            <label class="pill">
+                <input type="checkbox" id="streamToggle"> Stream answer (SSE)
+            </label>
         </div>
         <button id="askBtn">Ask</button>
         <div id="queryStatus" class="status"></div>
@@ -132,10 +170,14 @@
 <script>
     const uploadBtn = document.getElementById('uploadBtn');
     const pdfInput = document.getElementById('pdfFile');
+    const uploadCategoryInput = document.getElementById('uploadCategory');
     const uploadStatus = document.getElementById('uploadStatus');
     const askBtn = document.getElementById('askBtn');
     const questionInput = document.getElementById('question');
     const topKInput = document.getElementById('topK');
+    const categorySelect = document.getElementById('category');
+    const apiKeyInput = document.getElementById('apiKey');
+    const streamToggle = document.getElementById('streamToggle');
     const queryStatus = document.getElementById('queryStatus');
     const answerBox = document.getElementById('answerBox');
     const sourcesBox = document.getElementById('sourcesBox');
@@ -153,6 +195,10 @@
 
         const formData = new FormData();
         formData.append('file', pdfInput.files[0]);
+        const uploadCategory = uploadCategoryInput.value.trim();
+        if (uploadCategory) {
+            formData.append('category', uploadCategory);
+        }
 
         uploadBtn.disabled = true;
         setStatus(uploadStatus, 'Uploading…');
@@ -178,6 +224,9 @@
     askBtn.addEventListener('click', async () => {
         const question = questionInput.value.trim();
         const topK = parseInt(topKInput.value, 10);
+        const category = categorySelect.value;
+        const apiKey = apiKeyInput.value.trim();
+        const stream = streamToggle.checked;
 
         if (!question) {
             setStatus(queryStatus, 'Please enter a question.', true);
@@ -190,28 +239,119 @@
         sourcesBox.innerHTML = '';
 
         try {
-            const response = await fetch('/query', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ query: question, topK })
-            });
-            if (!response.ok) {
-                throw new Error(await response.text());
+            if (stream) {
+                await streamQuery({ question, topK, category, apiKey });
+            } else {
+                await standardQuery({ question, topK, category, apiKey });
             }
-            const data = await response.json();
-            answerBox.textContent = data.answer || 'No answer returned.';
-            sourcesBox.innerHTML = (data.sources || [])
-                .map(src => `<span>chunk ${src.chunkIndex} • sim ${src.similarity.toFixed(2)}</span>`)
-                .join('');
-            setStatus(queryStatus, 'Done.');
         } catch (err) {
             console.error(err);
             answerBox.textContent = '—';
             setStatus(queryStatus, 'Query failed: ' + err.message, true);
         } finally {
             askBtn.disabled = false;
+        }
+    });
+
+    async function standardQuery({ question, topK, category, apiKey }) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['X-API-KEY'] = apiKey;
+        const response = await fetch('/query', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ query: question, topK, category })
+        });
+        if (!response.ok) {
+            throw new Error(await response.text());
+        }
+        const data = await response.json();
+        answerBox.textContent = data.answer || 'No answer returned.';
+        sourcesBox.innerHTML = (data.sources || [])
+            .map(src => `<span>chunk ${src.chunkIndex} • sim ${src.similarity.toFixed(2)}</span>`)
+            .join('');
+        setStatus(queryStatus, 'Done.');
+    }
+
+    async function streamQuery({ question, topK, category, apiKey }) {
+        const headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream'
+        };
+        if (apiKey) headers['X-API-KEY'] = apiKey;
+        const response = await fetch('/query/stream', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ query: question, topK, category })
+        });
+        if (!response.ok || !response.body) {
+            throw new Error(await response.text());
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        answerBox.textContent = '';
+        sourcesBox.innerHTML = '';
+        setStatus(queryStatus, 'Streaming…');
+
+        let buffer = '';
+        let received = false;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            buffer = processSseBuffer(buffer, chunk => {
+                received = true;
+                answerBox.textContent += chunk;
+            });
+        }
+        buffer = processSseBuffer(buffer, chunk => {
+            received = true;
+            answerBox.textContent += chunk;
+        }, true);
+        setStatus(queryStatus, received ? 'Done (stream).' : 'Done (no stream data)');
+    }
+
+    function processSseBuffer(buf, onChunk, flush = false) {
+        const delimiter = buf.includes('\r\n\r\n') ? '\r\n\r\n' : '\n\n';
+        let idx;
+        while ((idx = buf.indexOf(delimiter)) >= 0) {
+            const rawEvent = buf.slice(0, idx).trim();
+            buf = buf.slice(idx + delimiter.length);
+            const chunk = extractData(rawEvent);
+            if (chunk) onChunk(chunk);
+        }
+        if (flush && buf.trim()) {
+            const chunk = extractData(buf.trim());
+            if (chunk) onChunk(chunk);
+        }
+        return buf;
+    }
+
+    function extractData(rawEvent) {
+        if (!rawEvent) return null;
+        if (rawEvent.startsWith('data:')) {
+            const data = rawEvent.slice(5).trim();
+            if (!data || data === '[DONE]') return null;
+            return data;
+        }
+        // fallback: treat entire line as content if no data prefix
+        if (rawEvent === '[DONE]') return null;
+        return rawEvent;
+    }
+
+    // Populate categories on load
+    window.addEventListener('DOMContentLoaded', async () => {
+        try {
+            const res = await fetch('/categories');
+            if (!res.ok) return;
+            const cats = await res.json();
+            cats.forEach(cat => {
+                const opt = document.createElement('option');
+                opt.value = cat;
+                opt.textContent = cat;
+                categorySelect.appendChild(opt);
+            });
+        } catch (e) {
+            console.warn('Could not load categories', e);
         }
     });
 </script>
